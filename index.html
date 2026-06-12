@@ -1,1059 +1,298 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<meta name="theme-color" content="#111111">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>RJ Auto Service</title>
-<link rel="manifest" href="manifest.json">
-<style>
-/* ── TOKENS ──────────────────────────────────────────────── */
-:root {
-  --bg:       #111111;
-  --surface:  #1A1A1A;
-  --surface2: #242424;
-  --border:   #2E2E2E;
-  --gold:     #E8A800;
-  --gold-dim: #9A7000;
-  --red:      #E05252;
-  --green:    #4CAF82;
-  --blue:     #4A9EE0;
-  --orange:   #E07840;
-  --text:     #F0F0F0;
-  --text-dim: #888888;
-  --text-faint:#444444;
-  --radius:   10px;
-  --shadow:   0 2px 12px rgba(0,0,0,0.5);
-  --font:     'Inter', system-ui, -apple-system, sans-serif;
+// ============================================================
+// RJ AUTO SERVICE - Google Apps Script Backend v2
+// ============================================================
+
+const SHEETS = {
+  CLIENTES:       'Clientes',
+  VEHICULOS:      'Vehiculos',
+  ORDENES:        'Ordenes',
+  DETALLEORDENES: 'DetalleOrdenes',
+  CITAS:          'Citas',
+  CAJA:           'Caja',
+  MECANICOS:      'Mecanicos',
+  DIVIDENDOS:     'Dividendos'
+};
+
+const HEADERS = {
+  Clientes:       ['ID','Nombre','Telefono','Email','FechaRegistro'],
+  Vehiculos:      ['ID','ClienteID','Placa','Marca','Modelo','Anio','Color','Kilometraje'],
+  Ordenes:        ['ID','VehiculoID','ClienteID','MecanicoID','FechaEntrada','FechaSalida','Estado','Descripcion','TotalManoObra','TotalRepuestos','TotalCobrado','Notas'],
+  DetalleOrdenes: ['ID','OrdenID','Tipo','Descripcion','CostoTaller','PrecioCliente','ClienteTrae','Cantidad','SocioGasto','SocioIngreso'],
+  Citas:          ['ID','ClienteID','VehiculoID','Fecha','Hora','Motivo','Estado','Notas'],
+  Caja:           ['ID','OrdenID','Fecha','Concepto','Categoria','Monto','Tipo','Socio','MetodoPago','Referencia'],
+  Mecanicos:      ['ID','Nombre','Telefono','Especialidad','Estado'],
+  Dividendos:     ['ID','Periodo','Fecha','Monto','Decision','Notas']
+};
+
+// ─── UTILS ───────────────────────────────────────────────────
+
+function getSheet(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    const headers = HEADERS[name];
+    if (headers && headers.length > 0) {
+      sheet.appendRow(headers);
+      sheet.getRange(1, 1, 1, headers.length)
+        .setBackground('#1C1C1C').setFontColor('#F5B800').setFontWeight('bold');
+    }
+  }
+  return sheet;
 }
 
-/* ── RESET ───────────────────────────────────────────────── */
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;overflow:hidden}
-input,select,textarea,button{font-family:inherit;font-size:inherit}
-button{cursor:pointer}
-
-/* ── LAYOUT ──────────────────────────────────────────────── */
-#app{display:flex;flex-direction:column;height:100vh;max-width:430px;margin:0 auto;position:relative;background:var(--bg)}
-
-/* HEADER */
-#header{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:14px 16px 10px;
-  background:var(--surface);
-  border-bottom:1px solid var(--border);
-  flex-shrink:0;
-}
-.header-logo{display:flex;align-items:center;gap:10px}
-.logo-icon{width:32px;height:32px;background:var(--gold);border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#111;letter-spacing:-0.5px}
-.header-title{font-size:16px;font-weight:700;color:var(--text)}
-.header-sub{font-size:11px;color:var(--text-dim);margin-top:1px}
-#notif-badge{background:var(--red);color:#fff;border-radius:50%;width:20px;height:20px;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;display:none}
-
-/* CONTENT */
-#content{flex:1;overflow-y:auto;padding:16px 16px 80px;-webkit-overflow-scrolling:touch}
-
-/* BOTTOM NAV */
-#nav{
-  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
-  width:100%;max-width:430px;
-  display:flex;background:var(--surface);
-  border-top:1px solid var(--border);
-  padding:6px 0 max(6px, env(safe-area-inset-bottom));
-  z-index:100;
-}
-.nav-item{
-  flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
-  padding:6px 4px;border:none;background:none;
-  color:var(--text-dim);font-size:10px;font-weight:500;
-  transition:color 0.15s;
-}
-.nav-item svg{width:22px;height:22px;stroke-width:1.8}
-.nav-item.active{color:var(--gold)}
-.nav-item.active svg{stroke:var(--gold)}
-
-/* ── CARDS ───────────────────────────────────────────────── */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:12px}
-.card-title{font-size:13px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px}
-.card-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
-.card-row:last-child{border-bottom:none;padding-bottom:0}
-.card-label{font-size:13px;color:var(--text-dim)}
-.card-value{font-size:13px;font-weight:600;color:var(--text)}
-
-/* ── KPI GRID ────────────────────────────────────────────── */
-.kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
-.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px;position:relative;overflow:hidden}
-.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent,var(--gold))}
-.kpi-val{font-size:26px;font-weight:800;color:var(--text);line-height:1}
-.kpi-label{font-size:11px;color:var(--text-dim);margin-top:6px}
-
-/* ── STATUS BADGES ───────────────────────────────────────── */
-.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600}
-.badge::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.7}
-.badge-pendiente{background:rgba(232,168,0,0.15);color:var(--gold)}
-.badge-proceso{background:rgba(74,158,224,0.15);color:var(--blue)}
-.badge-listo{background:rgba(76,175,130,0.15);color:var(--green)}
-.badge-entregado{background:rgba(136,136,136,0.15);color:var(--text-dim)}
-.badge-cancelado{background:rgba(224,82,82,0.15);color:var(--red)}
-
-/* ── LIST ITEMS ──────────────────────────────────────────── */
-.list-item{
-  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
-  padding:14px;margin-bottom:8px;cursor:pointer;
-  transition:border-color 0.15s;
-  position:relative;
-}
-.list-item:active{border-color:var(--gold-dim)}
-.list-item-title{font-size:14px;font-weight:600;margin-bottom:4px}
-.list-item-sub{font-size:12px;color:var(--text-dim)}
-.list-item-meta{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
-.list-item-right{position:absolute;right:14px;top:50%;transform:translateY(-50%)}
-
-/* ── FORMS ───────────────────────────────────────────────── */
-.form-group{margin-bottom:14px}
-.form-label{display:block;font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.4px}
-.form-input,.form-select,.form-textarea{
-  width:100%;background:var(--surface2);border:1px solid var(--border);
-  border-radius:8px;padding:11px 13px;color:var(--text);
-  transition:border-color 0.15s;outline:none;
-}
-.form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--gold)}
-.form-select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
-.form-textarea{resize:vertical;min-height:80px}
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-
-/* ── BUTTONS ─────────────────────────────────────────────── */
-.btn{padding:12px 20px;border-radius:8px;font-weight:600;font-size:14px;border:none;transition:opacity 0.15s;display:inline-flex;align-items:center;gap:8px;justify-content:center}
-.btn:active{opacity:0.8}
-.btn-primary{background:var(--gold);color:#111;width:100%}
-.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border);width:100%}
-.btn-danger{background:rgba(224,82,82,0.15);color:var(--red);border:1px solid rgba(224,82,82,0.2);width:100%}
-.btn-sm{padding:7px 14px;font-size:12px}
-.btn-icon{width:36px;height:36px;padding:0;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--text-dim)}
-
-/* ── MODAL / DRAWER ──────────────────────────────────────── */
-#overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:none;align-items:flex-end;justify-content:center}
-#overlay.open{display:flex}
-#drawer{
-  background:var(--surface);border-radius:16px 16px 0 0;
-  width:100%;max-width:430px;max-height:92vh;
-  overflow-y:auto;padding:20px 16px max(20px,env(safe-area-inset-bottom));
-  transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.32,0.72,0,1);
-}
-#overlay.open #drawer{transform:translateY(0)}
-.drawer-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 18px}
-.drawer-title{font-size:18px;font-weight:700;margin-bottom:20px}
-
-/* ── SEARCH ──────────────────────────────────────────────── */
-.search-box{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:16px}
-.search-box svg{color:var(--text-dim);flex-shrink:0;width:16px;height:16px}
-.search-box input{background:none;border:none;outline:none;color:var(--text);flex:1;font-size:14px}
-.search-box input::placeholder{color:var(--text-faint)}
-
-/* ── FAB ──────────────────────────────────────────────────── */
-.fab{
-  position:fixed;bottom:80px;right:calc(50% - 200px);
-  width:52px;height:52px;border-radius:50%;
-  background:var(--gold);color:#111;border:none;
-  font-size:26px;font-weight:300;box-shadow:0 4px 20px rgba(232,168,0,0.4);
-  display:flex;align-items:center;justify-content:center;
-  z-index:90;transition:transform 0.15s;
-}
-.fab:active{transform:scale(0.92)}
-
-/* ── MISC ─────────────────────────────────────────────────── */
-.section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-.section-title{font-size:16px;font-weight:700}
-.empty-state{text-align:center;padding:40px 20px;color:var(--text-dim)}
-.empty-state svg{width:48px;height:48px;margin:0 auto 12px;display:block;opacity:0.3}
-.empty-state p{font-size:14px}
-.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:500;opacity:0;transition:opacity 0.2s;pointer-events:none;white-space:nowrap}
-.toast.show{opacity:1}
-.loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text-dim);gap:10px}
-.spinner{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin 0.7s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.divider{height:1px;background:var(--border);margin:16px 0}
-.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
-</style>
-</head>
-<body>
-<div id="app">
-  <!-- HEADER -->
-  <header id="header">
-    <div class="header-logo">
-      <div class="logo-icon">RJ</div>
-      <div>
-        <div class="header-title">RJ Auto Service</div>
-        <div class="header-sub" id="header-sub">Cargando...</div>
-      </div>
-    </div>
-    <div id="notif-badge"></div>
-  </header>
-
-  <!-- CONTENT -->
-  <main id="content"></main>
-
-  <!-- BOTTOM NAV -->
-  <nav id="nav">
-    <button class="nav-item active" onclick="navigate('dashboard')" data-tab="dashboard">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-      Inicio
-    </button>
-    <button class="nav-item" onclick="navigate('ordenes')" data-tab="ordenes">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>
-      Órdenes
-    </button>
-    <button class="nav-item" onclick="navigate('clientes')" data-tab="clientes">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="7" r="4"/><path d="M3 21v-2a4 4 0 014-4h10a4 4 0 014 4v2"/></svg>
-      Clientes
-    </button>
-    <button class="nav-item" onclick="navigate('citas')" data-tab="citas">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      Citas
-    </button>
-    <button class="nav-item" onclick="navigate('corte')" data-tab="corte">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-      Corte
-    </button>
-  </nav>
-</div>
-
-<!-- OVERLAY / DRAWER -->
-<div id="overlay" onclick="closeDrawer(event)">
-  <div id="drawer">
-    <div class="drawer-handle"></div>
-    <div id="drawer-content"></div>
-  </div>
-</div>
-
-<!-- TOAST -->
-<div class="toast" id="toast"></div>
-
-<script>
-// ── CONFIG ────────────────────────────────────────────────────
-const API_URL = 'https://script.google.com/macros/s/AKfycbziHOwaqAOwC7FMWKddyz3ReV2enPDrrVYFa3nFFWm3efk9ywND0r5VKIbY4ZTUvPsXZw/exec'; // Reemplazar tras desplegar
-
-// ── STATE ─────────────────────────────────────────────────────
-let currentTab = 'dashboard';
-let cache = {};
-
-// ── API ───────────────────────────────────────────────────────
-async function api(params) {
-  const url = new URL(API_URL);
-  Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
-  const r = await fetch(url);
-  const d = await r.json();
-  if (!d.success) throw new Error(d.error);
-  return d.data;
+function genId(prefix) {
+  return prefix + '-' + new Date().getTime();
 }
 
-async function apiPost(body) {
-  const { action, sheet, data, id, updates } = body;
-  const url = new URL(API_URL);
-  url.searchParams.set('action', action);
-  if (sheet)   url.searchParams.set('sheet', sheet);
-  if (data)    url.searchParams.set('data', JSON.stringify(data));
-  if (id)      url.searchParams.set('id', id);
-  if (updates) url.searchParams.set('updates', JSON.stringify(updates));
-  const r = await fetch(url);
-  const d = await r.json();
-  if (!d.success) throw new Error(d.error);
-  return d.data;
+function sheetToObjects(sheet) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+  const headers = data[0];
+  return data.slice(1).map(row => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = row[i]);
+    return obj;
+  });
 }
 
-async function getAll(sheet) {
-  if (cache[sheet]) return cache[sheet];
-  const data = await api({action:'getAll', sheet});
-  cache[sheet] = data;
+function respond(data) {
+  return ContentService.createTextOutput(JSON.stringify({ success: true, data: data }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function respondErr(msg) {
+  return ContentService.createTextOutput(JSON.stringify({ success: false, error: msg }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ─── ROUTER ──────────────────────────────────────────────────
+
+function doGet(e) {
+  try {
+    const p = e.parameter;
+    const action = p.action;
+    switch (action) {
+      case 'getAll':          return respond(handleGetAll(p.sheet));
+      case 'getById':         return respond(handleGetById(p.sheet, p.id));
+      case 'getByField':      return respond(handleGetByField(p.sheet, p.field, p.value));
+      case 'getDashboard':    return respond(handleDashboard());
+      case 'getOrdenFull':    return respond(handleGetOrdenFull(p.id));
+      case 'create':          return respond(handleCreate(p.sheet, JSON.parse(p.data)));
+      case 'update':          return respond(handleUpdate(p.sheet, p.id, JSON.parse(p.updates)));
+      case 'delete':          return respond(handleDelete(p.sheet, p.id));
+      case 'entregarOrden':   return respond(handleEntregarOrden(p.id, p.metodo));
+      default:                return respondErr('Accion no reconocida: ' + action);
+    }
+  } catch(e) { return respondErr(e.message); }
+}
+
+// ─── HANDLERS ────────────────────────────────────────────────
+
+function handleGetAll(sheetName) {
+  if (!SHEETS[sheetName.toUpperCase()]) throw new Error('Hoja invalida: ' + sheetName);
+  return sheetToObjects(getSheet(sheetName));
+}
+
+function handleGetById(sheetName, id) {
+  const rows = sheetToObjects(getSheet(sheetName));
+  const row = rows.find(r => r.ID === id);
+  if (!row) throw new Error('No encontrado');
+  return row;
+}
+
+function handleGetByField(sheetName, field, value) {
+  const rows = sheetToObjects(getSheet(sheetName));
+  return rows.filter(r => String(r[field]).toLowerCase() === String(value).toLowerCase());
+}
+
+function handleCreate(sheetName, data) {
+  const sheet = getSheet(sheetName);
+  const headers = HEADERS[sheetName];
+  const prefixes = {
+    Clientes:'CLI', Vehiculos:'VEH', Ordenes:'ORD',
+    DetalleOrdenes:'DET', Citas:'CIT', Caja:'CAJ',
+    Mecanicos:'MEC', Dividendos:'DIV'
+  };
+  data.ID = genId(prefixes[sheetName] || 'REC');
+  if (!data.FechaRegistro && sheetName === 'Clientes') {
+    data.FechaRegistro = new Date().toISOString().split('T')[0];
+  }
+  const row = headers.map(h => data[h] !== undefined ? data[h] : '');
+  sheet.appendRow(row);
   return data;
 }
 
-function clearCache(sheet) { delete cache[sheet]; }
+function handleUpdate(sheetName, id, updates) {
+  const sheet = getSheet(sheetName);
+  const headers = HEADERS[sheetName];
+  const data = sheet.getDataRange().getValues();
+  const idCol = headers.indexOf('ID');
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][idCol] === id) {
+      Object.keys(updates).forEach(key => {
+        const col = headers.indexOf(key);
+        if (col >= 0) sheet.getRange(i + 1, col + 1).setValue(updates[key]);
+      });
+      return { ID: id, updated: true };
+    }
+  }
+  throw new Error('Registro no encontrado: ' + id);
+}
 
-// ── NAVIGATION ────────────────────────────────────────────────
-function navigate(tab) {
-  currentTab = tab;
-  document.querySelectorAll('.nav-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.tab === tab);
+function handleDelete(sheetName, id) {
+  const sheet = getSheet(sheetName);
+  const headers = HEADERS[sheetName];
+  const data = sheet.getDataRange().getValues();
+  const idCol = headers.indexOf('ID');
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][idCol] === id) {
+      sheet.deleteRow(i + 1);
+      return { deleted: id };
+    }
+  }
+  throw new Error('Registro no encontrado');
+}
+
+// ─── ORDEN FULL (orden + detalle) ────────────────────────────
+
+function handleGetOrdenFull(ordenId) {
+  const ordenes = sheetToObjects(getSheet('Ordenes'));
+  const orden = ordenes.find(o => o.ID === ordenId);
+  if (!orden) throw new Error('Orden no encontrada');
+  const detalles = sheetToObjects(getSheet('DetalleOrdenes'));
+  orden.items = detalles.filter(d => d.OrdenID === ordenId);
+  return orden;
+}
+
+// ─── ENTREGAR ORDEN → genera cobro en caja ───────────────────
+
+function handleEntregarOrden(ordenId, metodo) {
+  const ordenes = sheetToObjects(getSheet('Ordenes'));
+  const orden = ordenes.find(o => o.ID === ordenId);
+  if (!orden) throw new Error('Orden no encontrada');
+  if (orden.Estado === 'Entregado') throw new Error('Esta orden ya fue entregada');
+
+  const detalles = sheetToObjects(getSheet('DetalleOrdenes'));
+  const items = detalles.filter(d => d.OrdenID === ordenId);
+
+  // Calcular totales
+  const totalManoObra = items
+    .filter(i => i.Tipo === 'ManoObra')
+    .reduce((s,i) => s + (parseFloat(i.PrecioCliente)||0) * (parseFloat(i.Cantidad)||1), 0);
+
+  const totalRepuestos = items
+    .filter(i => i.Tipo === 'Repuesto' && i.ClienteTrae !== 'SI')
+    .reduce((s,i) => s + (parseFloat(i.PrecioCliente)||0) * (parseFloat(i.Cantidad)||1), 0);
+
+  const totalCobrado = totalManoObra + totalRepuestos;
+  const hoy = new Date().toISOString().split('T')[0];
+
+  // Actualizar orden
+  handleUpdate('Ordenes', ordenId, {
+    Estado: 'Entregado',
+    FechaSalida: hoy,
+    TotalManoObra: totalManoObra,
+    TotalRepuestos: totalRepuestos,
+    TotalCobrado: totalCobrado
   });
-  const views = {
-    dashboard: renderDashboard,
-    ordenes:   renderOrdenes,
-    clientes:  renderClientes,
-    citas:     renderCitas,
-    corte:     renderCorte,
-  };
-  views[tab]?.();
-}
 
-// ── DASHBOARD ─────────────────────────────────────────────────
-async function renderDashboard() {
-  const content = document.getElementById('content');
-  content.innerHTML = `<div class="loading"><div class="spinner"></div> Cargando...</div>`;
-  try {
-    const d = await api({action:'getDashboard'});
-    const hoy = new Date().toLocaleDateString('es-DO',{weekday:'long',day:'numeric',month:'long'});
-    document.getElementById('header-sub').textContent = hoy;
-    content.innerHTML = `
-      <div class="kpi-grid">
-        <div class="kpi" style="--accent:var(--gold)">
-          <div class="kpi-val">${d.ordenesActivas}</div>
-          <div class="kpi-label">Órdenes activas</div>
-        </div>
-        <div class="kpi" style="--accent:var(--green)">
-          <div class="kpi-val">RD$${(d.ingresosMes||0).toLocaleString('es-DO')}</div>
-          <div class="kpi-label">Ingresos este mes</div>
-        </div>
-        <div class="kpi" style="--accent:var(--blue)">
-          <div class="kpi-val">${d.citasHoy}</div>
-          <div class="kpi-label">Citas hoy</div>
-        </div>
-        <div class="kpi" style="--accent:var(--text-dim)">
-          <div class="kpi-val">${d.totalClientes}</div>
-          <div class="kpi-label">Clientes</div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Estado de órdenes</div>
-        ${Object.entries(d.estadosOrdenes||{}).map(([k,v])=>`
-          <div class="card-row">
-            <span class="card-label">${k}</span>
-            <span class="card-value">${v}</span>
-          </div>`).join('')}
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
-        <button class="btn btn-secondary" onclick="navigate('ordenes')">Ver órdenes</button>
-        <button class="btn btn-secondary" onclick="navigate('corte')">Corte / Caja</button>
-      </div>`;
-  } catch(e) { showError(content, e.message); }
-}
-
-// ── ÓRDENES ───────────────────────────────────────────────────
-async function renderOrdenes(filter='') {
-  const content = document.getElementById('content');
-  content.innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
-  try {
-    const [ordenes, vehiculos, mecanicos] = await Promise.all([
-      getAll('Ordenes'), getAll('Vehiculos'), getAll('Mecanicos')
-    ]);
-    const vMap = Object.fromEntries(vehiculos.map(v=>[v.ID,v]));
-    const mMap = Object.fromEntries(mecanicos.map(m=>[m.ID,m]));
-    const filtered = ordenes.filter(o =>
-      !filter ||
-      (vMap[o.VehiculoID]?.Placa||'').toLowerCase().includes(filter.toLowerCase()) ||
-      o.Estado?.toLowerCase().includes(filter.toLowerCase()) ||
-      o.Descripcion?.toLowerCase().includes(filter.toLowerCase())
-    );
-    const sorted = [...filtered].sort((a,b)=>b.FechaEntrada?.localeCompare(a.FechaEntrada||'')||0);
-    content.innerHTML = `
-      <div class="section-header">
-        <span class="section-title">Órdenes</span>
-        <button class="btn btn-primary btn-sm" onclick="openOrdenForm()">+ Nueva</button>
-      </div>
-      <div class="search-box">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        <input type="text" placeholder="Buscar placa, estado..." value="${filter}" oninput="renderOrdenes(this.value)">
-      </div>
-      ${sorted.length ? sorted.map(o=>{
-        const v = vMap[o.VehiculoID]||{};
-        const m = mMap[o.MecanicoID]||{};
-        const badgeClass = {
-          'Pendiente':'badge-pendiente','En proceso':'badge-proceso',
-          'Listo':'badge-listo','Entregado':'badge-entregado','Cancelado':'badge-cancelado'
-        }[o.Estado]||'badge-pendiente';
-        return `<div class="list-item" onclick="openOrden('${o.ID}')">
-          <div class="list-item-title">${v.Marca||'—'} ${v.Modelo||''} · <span style="color:var(--gold)">${v.Placa||'Sin placa'}</span></div>
-          <div class="list-item-sub">${o.Descripcion||'Sin descripción'}</div>
-          <div class="list-item-meta">
-            <span class="badge ${badgeClass}">${o.Estado||'Pendiente'}</span>
-            <span style="font-size:12px;color:var(--text-dim)">${m.Nombre||'Sin mecánico'} · ${o.FechaEntrada||''}</span>
-          </div>
-        </div>`;
-      }).join('') : '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg><p>No hay órdenes</p></div>'}`;
-  } catch(e) { showError(content, e.message); }
-}
-
-async function openOrden(id) {
-  const ordenes = await getAll('Ordenes');
-  const o = ordenes.find(x=>x.ID===id);
-  if (!o) return;
-  const vehiculos = await getAll('Vehiculos');
-  const mecanicos = await getAll('Mecanicos');
-  const v = vehiculos.find(x=>x.ID===o.VehiculoID)||{};
-  const m = mecanicos.find(x=>x.ID===o.MecanicoID)||{};
-
-  const badgeClass = {'Pendiente':'badge-pendiente','En proceso':'badge-proceso','Listo':'badge-listo','Entregado':'badge-entregado','Cancelado':'badge-cancelado'}[o.Estado]||'badge-pendiente';
-
-  openDrawer(`
-    <div class="drawer-title">Orden ${o.ID}</div>
-    <div class="card">
-      <div class="card-row"><span class="card-label">Vehículo</span><span class="card-value">${v.Marca||''} ${v.Modelo||''}</span></div>
-      <div class="card-row"><span class="card-label">Placa</span><span class="card-value" style="color:var(--gold)">${v.Placa||'—'}</span></div>
-      <div class="card-row"><span class="card-label">Mecánico</span><span class="card-value">${m.Nombre||'—'}</span></div>
-      <div class="card-row"><span class="card-label">Estado</span><span class="badge ${badgeClass}">${o.Estado}</span></div>
-      <div class="card-row"><span class="card-label">Entrada</span><span class="card-value">${o.FechaEntrada||'—'}</span></div>
-      <div class="card-row"><span class="card-label">Salida</span><span class="card-value">${o.FechaSalida||'—'}</span></div>
-      <div class="card-row"><span class="card-label">Costo</span><span class="card-value">RD$${(parseFloat(o.CostoTotal)||0).toLocaleString('es-DO')}</span></div>
-    </div>
-    <div class="card"><div class="card-title">Descripción</div><p style="font-size:14px;line-height:1.6;color:var(--text-dim)">${o.Descripcion||'—'}</p></div>
-    <div class="card"><div class="card-title">Notas</div><p style="font-size:14px;line-height:1.6;color:var(--text-dim)">${o.Notas||'—'}</p></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
-      <button class="btn btn-secondary" onclick="openOrdenEdit('${o.ID}')">✏️ Editar</button>
-      <button class="btn btn-secondary" onclick="cambiarEstado('${o.ID}','${o.Estado}')">🔄 Estado</button>
-    </div>
-    <div style="margin-top:10px">
-      <button class="btn btn-danger btn-sm" onclick="deleteRecord('Ordenes','${o.ID}','ordenes')">Eliminar orden</button>
-    </div>
-  `);
-}
-
-async function openOrdenForm(id) {
-  const vehiculos = await getAll('Vehiculos');
-  const mecanicos = await getAll('Mecanicos');
-  const hoy = new Date().toISOString().split('T')[0];
-  openDrawer(`
-    <div class="drawer-title">Nueva orden</div>
-    <div class="form-group">
-      <label class="form-label">Vehículo</label>
-      <select class="form-select" id="f-vehiculo">
-        <option value="">Seleccionar...</option>
-        ${vehiculos.map(v=>`<option value="${v.ID}">${v.Placa} – ${v.Marca} ${v.Modelo}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Mecánico</label>
-      <select class="form-select" id="f-mecanico">
-        <option value="">Sin asignar</option>
-        ${mecanicos.filter(m=>m.Estado==='Activo'||!m.Estado).map(m=>`<option value="${m.ID}">${m.Nombre}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Descripción del trabajo</label>
-      <textarea class="form-textarea" id="f-desc" placeholder="Ej: Cambio de aceite, revisión de frenos..."></textarea>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Fecha entrada</label>
-        <input type="date" class="form-input" id="f-fecha" value="${hoy}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Costo M.O. (RD$)</label>
-        <input type="number" class="form-input" id="f-costo" placeholder="0">
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Estado</label>
-      <select class="form-select" id="f-estado">
-        <option>Pendiente</option><option>En proceso</option><option>Listo</option><option>Entregado</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Notas</label>
-      <textarea class="form-textarea" id="f-notas" placeholder="Notas adicionales..."></textarea>
-    </div>
-    <button class="btn btn-primary" onclick="saveOrden()">Guardar orden</button>
-  `);
-}
-
-async function saveOrden() {
-  const data = {
-    VehiculoID: document.getElementById('f-vehiculo').value,
-    MecanicoID: document.getElementById('f-mecanico').value,
-    Descripcion: document.getElementById('f-desc').value,
-    FechaEntrada: document.getElementById('f-fecha').value,
-    CostoManoObra: document.getElementById('f-costo').value,
-    CostoTotal: document.getElementById('f-costo').value,
-    Estado: document.getElementById('f-estado').value,
-    Notas: document.getElementById('f-notas').value,
-  };
-  if (!data.VehiculoID) { showToast('Selecciona un vehículo'); return; }
-  try {
-    await apiPost({action:'create', sheet:'Ordenes', data});
-    clearCache('Ordenes'); closeDrawer(); renderOrdenes();
-    showToast('✅ Orden creada');
-  } catch(e) { showToast('Error: '+e.message); }
-}
-
-async function cambiarEstado(id, estadoActual) {
-  const estados = ['Pendiente','En proceso','Listo','Entregado','Cancelado'];
-  openDrawer(`
-    <div class="drawer-title">Cambiar estado</div>
-    ${estados.map(e=>`
-      <button class="btn btn-secondary" style="margin-bottom:8px;${e===estadoActual?'border-color:var(--gold);color:var(--gold)':''}"
-        onclick="setEstado('${id}','${e}')">
-        ${e===estadoActual?'✓ ':''} ${e}
-      </button>`).join('')}
-  `);
-}
-
-async function setEstado(id, estado) {
-  try {
-    await apiPost({action:'update', sheet:'Ordenes', id, updates:{Estado:estado}});
-    clearCache('Ordenes'); closeDrawer(); renderOrdenes();
-    showToast('Estado actualizado');
-  } catch(e) { showToast('Error: '+e.message); }
-}
-
-// ── CLIENTES ──────────────────────────────────────────────────
-async function renderClientes(filter='') {
-  const content = document.getElementById('content');
-  content.innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
-  try {
-    const clientes = await getAll('Clientes');
-    const filtered = clientes.filter(c =>
-      !filter ||
-      c.Nombre?.toLowerCase().includes(filter.toLowerCase()) ||
-      c.Telefono?.includes(filter) ||
-      c.Email?.toLowerCase().includes(filter.toLowerCase())
-    );
-    content.innerHTML = `
-      <div class="section-header">
-        <span class="section-title">Clientes</span>
-        <button class="btn btn-primary btn-sm" onclick="openClienteForm()">+ Nuevo</button>
-      </div>
-      <div class="search-box">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        <input type="text" placeholder="Buscar nombre, tel..." value="${filter}" oninput="renderClientes(this.value)">
-      </div>
-      ${filtered.length ? filtered.map(c=>`
-        <div class="list-item" onclick="openCliente('${c.ID}')">
-          <div style="display:flex;align-items:center;gap:12px">
-            <div style="width:40px;height:40px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--gold);font-size:16px;flex-shrink:0">
-              ${(c.Nombre||'?')[0].toUpperCase()}
-            </div>
-            <div>
-              <div class="list-item-title">${c.Nombre||'—'}</div>
-              <div class="list-item-sub">${c.Telefono||''} ${c.Email?'· '+c.Email:''}</div>
-            </div>
-          </div>
-        </div>`).join('') : '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="7" r="4"/><path d="M3 21v-2a4 4 0 014-4h10a4 4 0 014 4v2"/></svg><p>No hay clientes</p></div>'}`;
-  } catch(e) { showError(content, e.message); }
-}
-
-async function openCliente(id) {
-  const clientes = await getAll('Clientes');
-  const c = clientes.find(x=>x.ID===id);
-  const vehiculos = await getAll('Vehiculos');
-  const misVehiculos = vehiculos.filter(v=>v.ClienteID===id);
-  openDrawer(`
-    <div class="drawer-title">${c.Nombre}</div>
-    <div class="card">
-      <div class="card-row"><span class="card-label">Teléfono</span><a href="tel:${c.Telefono}" style="color:var(--gold);font-weight:600">${c.Telefono||'—'}</a></div>
-      <div class="card-row"><span class="card-label">Email</span><span class="card-value">${c.Email||'—'}</span></div>
-      <div class="card-row"><span class="card-label">Registrado</span><span class="card-value">${c.FechaRegistro||'—'}</span></div>
-    </div>
-    <div class="section-header" style="margin-top:4px">
-      <span class="section-title" style="font-size:14px">Vehículos</span>
-      <button class="btn btn-primary btn-sm" onclick="openVehiculoForm('${id}')">+ Agregar</button>
-    </div>
-    ${misVehiculos.length ? misVehiculos.map(v=>`
-      <div class="list-item">
-        <div class="list-item-title" style="color:var(--gold)">${v.Placa||'Sin placa'}</div>
-        <div class="list-item-sub">${v.Marca||''} ${v.Modelo||''} ${v.Anio||''} · ${v.Color||''}</div>
-      </div>`).join('') : '<p style="color:var(--text-dim);font-size:13px;padding:8px 0">Sin vehículos registrados</p>'}
-    <div style="margin-top:16px">
-      <button class="btn btn-danger btn-sm" onclick="deleteRecord('Clientes','${id}','clientes')">Eliminar cliente</button>
-    </div>
-  `);
-}
-
-function openClienteForm() {
-  openDrawer(`
-    <div class="drawer-title">Nuevo cliente</div>
-    <div class="form-group"><label class="form-label">Nombre completo</label><input type="text" class="form-input" id="f-nombre" placeholder="Ej: Juan Pérez"></div>
-    <div class="form-group"><label class="form-label">Teléfono</label><input type="tel" class="form-input" id="f-tel" placeholder="809-000-0000"></div>
-    <div class="form-group"><label class="form-label">Email</label><input type="email" class="form-input" id="f-email" placeholder="correo@ejemplo.com"></div>
-    <button class="btn btn-primary" onclick="saveCliente()">Guardar cliente</button>
-  `);
-}
-
-async function saveCliente() {
-  const data = {
-    Nombre: document.getElementById('f-nombre').value.trim(),
-    Telefono: document.getElementById('f-tel').value.trim(),
-    Email: document.getElementById('f-email').value.trim(),
-  };
-  if (!data.Nombre) { showToast('Escribe el nombre'); return; }
-  try {
-    await apiPost({action:'create', sheet:'Clientes', data});
-    clearCache('Clientes'); closeDrawer(); renderClientes();
-    showToast('✅ Cliente guardado');
-  } catch(e) { showToast('Error: '+e.message); }
-}
-
-function openVehiculoForm(clienteId) {
-  openDrawer(`
-    <div class="drawer-title">Agregar vehículo</div>
-    <div class="form-group"><label class="form-label">Placa</label><input type="text" class="form-input" id="f-placa" placeholder="A123456" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Marca</label><input type="text" class="form-input" id="f-marca" placeholder="Toyota"></div>
-      <div class="form-group"><label class="form-label">Modelo</label><input type="text" class="form-input" id="f-modelo" placeholder="Hilux"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Año</label><input type="number" class="form-input" id="f-anio" placeholder="${new Date().getFullYear()}"></div>
-      <div class="form-group"><label class="form-label">Color</label><input type="text" class="form-input" id="f-color" placeholder="Blanco"></div>
-    </div>
-    <div class="form-group"><label class="form-label">Kilometraje</label><input type="number" class="form-input" id="f-km" placeholder="0"></div>
-    <button class="btn btn-primary" onclick="saveVehiculo('${clienteId}')">Guardar vehículo</button>
-  `);
-}
-
-async function saveVehiculo(clienteId) {
-  const data = {
-    ClienteID: clienteId,
-    Placa: document.getElementById('f-placa').value.trim(),
-    Marca: document.getElementById('f-marca').value.trim(),
-    Modelo: document.getElementById('f-modelo').value.trim(),
-    Anio: document.getElementById('f-anio').value,
-    Color: document.getElementById('f-color').value.trim(),
-    Kilometraje: document.getElementById('f-km').value,
-  };
-  if (!data.Placa) { showToast('Escribe la placa'); return; }
-  try {
-    await apiPost({action:'create', sheet:'Vehiculos', data});
-    clearCache('Vehiculos'); closeDrawer();
-    showToast('✅ Vehículo guardado');
-  } catch(e) { showToast('Error: '+e.message); }
-}
-
-// ── CITAS ─────────────────────────────────────────────────────
-async function renderCitas(filter='') {
-  const content = document.getElementById('content');
-  content.innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
-  try {
-    const [citas, clientes, vehiculos] = await Promise.all([
-      getAll('Citas'), getAll('Clientes'), getAll('Vehiculos')
-    ]);
-    const cMap = Object.fromEntries(clientes.map(c=>[c.ID,c]));
-    const vMap = Object.fromEntries(vehiculos.map(v=>[v.ID,v]));
-    const hoy = new Date().toISOString().split('T')[0];
-    const sorted = [...citas].sort((a,b)=>(a.Fecha+a.Hora).localeCompare(b.Fecha+b.Hora));
-    const futuras = sorted.filter(c=>c.Fecha>=hoy);
-    const pasadas = sorted.filter(c=>c.Fecha<hoy);
-    content.innerHTML = `
-      <div class="section-header">
-        <span class="section-title">Citas</span>
-        <button class="btn btn-primary btn-sm" onclick="openCitaForm()">+ Nueva</button>
-      </div>
-      ${futuras.length?'<div class="card-title" style="margin-bottom:8px">Próximas</div>':''}
-      ${futuras.map(c=>{
-        const cl = cMap[c.ClienteID]||{};
-        const v = vMap[c.VehiculoID]||{};
-        const badgeClass = c.Estado==='Cancelada'?'badge-cancelado':c.Estado==='Confirmada'?'badge-listo':'badge-pendiente';
-        return `<div class="list-item" onclick="openCita('${c.ID}')">
-          <div class="list-item-title">${cl.Nombre||'—'}</div>
-          <div class="list-item-sub">${v.Placa||''} · ${c.Motivo||'Sin motivo'}</div>
-          <div class="list-item-meta">
-            <span class="badge ${badgeClass}">${c.Estado||'Pendiente'}</span>
-            <span style="font-size:12px;color:var(--gold);font-weight:600">${c.Fecha||''} ${c.Hora||''}</span>
-          </div>
-        </div>`;}).join('')}
-      ${pasadas.length?`<div class="divider"></div><div class="card-title" style="margin-bottom:8px">Anteriores</div>
-      ${pasadas.slice(-10).reverse().map(c=>{
-        const cl = cMap[c.ClienteID]||{};
-        return `<div class="list-item" style="opacity:0.6" onclick="openCita('${c.ID}')">
-          <div class="list-item-title">${cl.Nombre||'—'}</div>
-          <div class="list-item-sub">${c.Motivo||'Sin motivo'} · ${c.Fecha||''}</div>
-        </div>`;}).join('')}`:''}
-      ${!futuras.length&&!pasadas.length?'<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><p>No hay citas</p></div>':''}`;
-  } catch(e) { showError(content, e.message); }
-}
-
-async function openCitaForm() {
-  const [clientes, vehiculos] = await Promise.all([getAll('Clientes'), getAll('Vehiculos')]);
-  const hoy = new Date().toISOString().split('T')[0];
-  openDrawer(`
-    <div class="drawer-title">Nueva cita</div>
-    <div class="form-group">
-      <label class="form-label">Cliente</label>
-      <select class="form-select" id="f-cliente" onchange="updateVehiculoSelect()">
-        <option value="">Seleccionar...</option>
-        ${clientes.map(c=>`<option value="${c.ID}">${c.Nombre}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Vehículo</label>
-      <select class="form-select" id="f-vehiculo"><option value="">Primero selecciona cliente</option></select>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Fecha</label><input type="date" class="form-input" id="f-fecha" value="${hoy}"></div>
-      <div class="form-group"><label class="form-label">Hora</label><input type="time" class="form-input" id="f-hora" value="08:00"></div>
-    </div>
-    <div class="form-group"><label class="form-label">Motivo</label><input type="text" class="form-input" id="f-motivo" placeholder="Ej: Cambio de aceite"></div>
-    <div class="form-group"><label class="form-label">Estado</label>
-      <select class="form-select" id="f-estado">
-        <option>Pendiente</option><option>Confirmada</option><option>Cancelada</option>
-      </select>
-    </div>
-    <button class="btn btn-primary" onclick="saveCita()">Guardar cita</button>
-  `);
-  window._citasVehiculos = vehiculos;
-}
-
-function updateVehiculoSelect() {
-  const clienteId = document.getElementById('f-cliente').value;
-  const sel = document.getElementById('f-vehiculo');
-  const vvs = (window._citasVehiculos||[]).filter(v=>v.ClienteID===clienteId);
-  sel.innerHTML = vvs.length
-    ? vvs.map(v=>`<option value="${v.ID}">${v.Placa} – ${v.Marca} ${v.Modelo}</option>`).join('')
-    : '<option value="">Sin vehículos</option>';
-}
-
-async function saveCita() {
-  const data = {
-    ClienteID: document.getElementById('f-cliente').value,
-    VehiculoID: document.getElementById('f-vehiculo').value,
-    Fecha: document.getElementById('f-fecha').value,
-    Hora: document.getElementById('f-hora').value,
-    Motivo: document.getElementById('f-motivo').value.trim(),
-    Estado: document.getElementById('f-estado').value,
-  };
-  if (!data.ClienteID || !data.Fecha) { showToast('Completa los campos requeridos'); return; }
-  try {
-    await apiPost({action:'create', sheet:'Citas', data});
-    clearCache('Citas'); closeDrawer(); renderCitas();
-    showToast('✅ Cita guardada');
-  } catch(e) { showToast('Error: '+e.message); }
-}
-
-async function openCita(id) {
-  const citas = await getAll('Citas');
-  const c = citas.find(x=>x.ID===id);
-  const clientes = await getAll('Clientes');
-  const vehiculos = await getAll('Vehiculos');
-  const cl = clientes.find(x=>x.ID===c.ClienteID)||{};
-  const v = vehiculos.find(x=>x.ID===c.VehiculoID)||{};
-  openDrawer(`
-    <div class="drawer-title">Cita</div>
-    <div class="card">
-      <div class="card-row"><span class="card-label">Cliente</span><span class="card-value">${cl.Nombre||'—'}</span></div>
-      <div class="card-row"><span class="card-label">Vehículo</span><span class="card-value" style="color:var(--gold)">${v.Placa||'—'} ${v.Marca||''} ${v.Modelo||''}</span></div>
-      <div class="card-row"><span class="card-label">Fecha</span><span class="card-value">${c.Fecha||'—'}</span></div>
-      <div class="card-row"><span class="card-label">Hora</span><span class="card-value">${c.Hora||'—'}</span></div>
-      <div class="card-row"><span class="card-label">Motivo</span><span class="card-value">${c.Motivo||'—'}</span></div>
-      <div class="card-row"><span class="card-label">Estado</span><span class="card-value">${c.Estado||'—'}</span></div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
-      <button class="btn btn-secondary" onclick="setEstadoCita('${id}','Confirmada')">✅ Confirmar</button>
-      <button class="btn btn-secondary" onclick="setEstadoCita('${id}','Cancelada')">❌ Cancelar</button>
-    </div>
-    <div style="margin-top:10px">
-      <button class="btn btn-danger btn-sm" onclick="deleteRecord('Citas','${id}','citas')">Eliminar cita</button>
-    </div>
-  `);
-}
-
-async function setEstadoCita(id, estado) {
-  try {
-    await apiPost({action:'update', sheet:'Citas', id, updates:{Estado:estado}});
-    clearCache('Citas'); closeDrawer(); renderCitas();
-    showToast('Estado actualizado');
-  } catch(e) { showToast('Error: '+e.message); }
-}
-
-// ── CORTE / CAJA ──────────────────────────────────────────────
-// Los socios del cuaderno: se configuran con sus iniciales
-const SOCIOS = ['J', 'R', 'L'];  // Ajustar según el taller
-
-function getQuincenaDefecto() {
-  const hoy = new Date();
-  const y = hoy.getFullYear();
-  const m = String(hoy.getMonth()+1).padStart(2,'0');
-  if (hoy.getDate() <= 15) {
-    return { desde: `${y}-${m}-01`, hasta: `${y}-${m}-15`, label: `1-15 de ${hoy.toLocaleString('es-DO',{month:'long'})}` };
-  } else {
-    const ultimo = new Date(y, hoy.getMonth()+1, 0).getDate();
-    return { desde: `${y}-${m}-16`, hasta: `${y}-${m}-${ultimo}`, label: `16-${ultimo} de ${hoy.toLocaleString('es-DO',{month:'long'})}` };
+  // Registrar cobros en caja (por socio si aplica)
+  if (totalCobrado > 0) {
+    // Cobros generales de mano de obra
+    const moGeneral = itemsMO.filter(i=>!i.SocioIngreso);
+    const moGenTotal = moGeneral.reduce((s,i)=>s+(parseFloat(i.PrecioCliente)||0)*(parseFloat(i.Cantidad)||1),0);
+    if (moGenTotal > 0) {
+      handleCreate('Caja', {
+        OrdenID: ordenId, Fecha: hoy,
+        Concepto: 'M.O. orden ' + ordenId,
+        Categoria: 'Mano de obra', Monto: moGenTotal,
+        Tipo: 'Cobro', MetodoPago: metodo || 'Efectivo', Referencia: ordenId
+      });
+    }
+    // Cobros de mano de obra por socio
+    const sociosMO = [...new Set(itemsMO.filter(i=>i.SocioIngreso).map(i=>i.SocioIngreso))];
+    sociosMO.forEach(socio => {
+      const total = itemsMO.filter(i=>i.SocioIngreso===socio).reduce((s,i)=>s+(parseFloat(i.PrecioCliente)||0)*(parseFloat(i.Cantidad)||1),0);
+      if (total > 0) handleCreate('Caja', {
+        OrdenID: ordenId, Fecha: hoy,
+        Concepto: 'M.O. ' + socio + ' - orden ' + ordenId,
+        Categoria: 'Mano de obra', Monto: total,
+        Tipo: 'Cobro', Socio: socio, MetodoPago: metodo || 'Efectivo', Referencia: ordenId
+      });
+    });
+    // Cobros de repuestos
+    if (totalRepuestos > 0) {
+      handleCreate('Caja', {
+        OrdenID: ordenId, Fecha: hoy,
+        Concepto: 'Repuestos orden ' + ordenId,
+        Categoria: 'Repuesto vendido', Monto: totalRepuestos,
+        Tipo: 'Cobro', MetodoPago: metodo || 'Efectivo', Referencia: ordenId
+      });
+    }
+    // Gastos de repuestos por socio (adelantos)
+    const repConGasto = items.filter(i=>i.Tipo==='Repuesto'&&i.ClienteTrae!=='SI'&&i.SocioGasto&&parseFloat(i.CostoTaller)>0);
+    const sociosGasto = [...new Set(repConGasto.map(i=>i.SocioGasto))];
+    sociosGasto.forEach(socio => {
+      const total = repConGasto.filter(i=>i.SocioGasto===socio).reduce((s,i)=>s+(parseFloat(i.CostoTaller)||0)*(parseFloat(i.Cantidad)||1),0);
+      if (total > 0) handleCreate('Caja', {
+        OrdenID: ordenId, Fecha: hoy,
+        Concepto: 'Gasto repuesto ' + socio + ' - orden ' + ordenId,
+        Categoria: 'Repuesto', Monto: total,
+        Tipo: 'Gasto', Socio: socio, MetodoPago: 'Efectivo', Referencia: ordenId
+      });
+    });
+    // Gastos generales de repuestos sin socio
+    const repGeneral = items.filter(i=>i.Tipo==='Repuesto'&&i.ClienteTrae!=='SI'&&!i.SocioGasto&&parseFloat(i.CostoTaller)>0);
+    const totalRepGastoGeneral = repGeneral.reduce((s,i)=>s+(parseFloat(i.CostoTaller)||0)*(parseFloat(i.Cantidad)||1),0);
+    if (totalRepGastoGeneral > 0) handleCreate('Caja', {
+      OrdenID: ordenId, Fecha: hoy,
+      Concepto: 'Costo repuestos orden ' + ordenId,
+      Categoria: 'Repuesto', Monto: totalRepGastoGeneral,
+      Tipo: 'Gasto', MetodoPago: 'Efectivo', Referencia: ordenId
+    });
   }
+
+  return { ordenId, totalCobrado, estado: 'Entregado' };
 }
 
-async function renderCorte(desdeParm, hastaParm) {
-  const content = document.getElementById('content');
-  content.innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
-  const q = getQuincenaDefecto();
-  const desde = desdeParm || q.desde;
-  const hasta  = hastaParm  || q.hasta;
+// ─── DASHBOARD ───────────────────────────────────────────────
 
-  try {
-    const caja = await getAll('Caja');
-    // filtro por rango de fecha
-    const periodo = caja.filter(c => {
-      const f = (c.Fecha||'').toString().substring(0,10);
-      return f >= desde && f <= hasta;
-    });
-
-    // totales globales
-    const ingresos  = periodo.filter(c=>c.Tipo==='Cobro').reduce((s,c)=>s+(parseFloat(c.Monto)||0),0);
-    const gastos    = periodo.filter(c=>c.Tipo==='Gasto').reduce((s,c)=>s+(parseFloat(c.Monto)||0),0);
-    const ganancia  = ingresos - gastos;
-    const porSocio  = ganancia / (SOCIOS.length || 1);
-
-    // desglose por categoría de gasto
-    const catGastos = {};
-    periodo.filter(c=>c.Tipo==='Gasto').forEach(c=>{
-      const cat = c.Categoria || c.Concepto?.split(' ')[0] || 'Otros';
-      catGastos[cat] = (catGastos[cat]||0) + (parseFloat(c.Monto)||0);
-    });
-
-    // desglose por categoría de ingreso
-    const catIngresos = {};
-    periodo.filter(c=>c.Tipo==='Cobro').forEach(c=>{
-      const cat = c.Categoria || 'Servicios';
-      catIngresos[cat] = (catIngresos[cat]||0) + (parseFloat(c.Monto)||0);
-    });
-
-    // movimientos del período ordenados
-    const movs = [...periodo].sort((a,b)=>b.Fecha?.localeCompare(a.Fecha||'')||0);
-
-    const fmt = v => `RD$${Math.round(v).toLocaleString('es-DO')}`;
-
-    content.innerHTML = `
-      <!-- HEADER CORTE -->
-      <div class="section-header">
-        <span class="section-title">Corte</span>
-        <button class="btn btn-primary btn-sm" onclick="openCajaForm()">+ Registrar</button>
-      </div>
-
-      <!-- SELECTOR DE PERÍODO -->
-      <div class="card" style="margin-bottom:12px">
-        <div class="card-title">Período</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Desde</label>
-            <input type="date" class="form-input" id="c-desde" value="${desde}">
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Hasta</label>
-            <input type="date" class="form-input" id="c-hasta" value="${hasta}">
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
-          <button class="btn btn-secondary btn-sm" onclick="filtroRapido('q1')">1–15</button>
-          <button class="btn btn-secondary btn-sm" onclick="filtroRapido('q2')">16–fin</button>
-          <button class="btn btn-secondary btn-sm" onclick="filtroRapido('mes')">Mes completo</button>
-        </div>
-        <button class="btn btn-primary" onclick="aplicarFiltro()">Calcular corte</button>
-      </div>
-
-      <!-- KPIs -->
-      <div class="kpi-grid" style="margin-bottom:12px">
-        <div class="kpi" style="--accent:var(--green)">
-          <div class="kpi-val" style="font-size:20px">${fmt(ingresos)}</div>
-          <div class="kpi-label">Ingresos</div>
-        </div>
-        <div class="kpi" style="--accent:var(--red)">
-          <div class="kpi-val" style="font-size:20px">${fmt(gastos)}</div>
-          <div class="kpi-label">Gastos / Costos</div>
-        </div>
-      </div>
-
-      <!-- BALANCE PRINCIPAL -->
-      <div class="card" style="margin-bottom:12px;border-color:${ganancia>=0?'rgba(76,175,130,0.3)':'rgba(224,82,82,0.3)'}">
-        <div class="card-row" style="border:none;padding:0">
-          <span style="font-size:15px;font-weight:700">Ganancia del período</span>
-          <span style="font-size:22px;font-weight:800;color:${ganancia>=0?'var(--green)':'var(--red)'}">${fmt(ganancia)}</span>
-        </div>
-      </div>
-
-      <!-- REPARTO POR SOCIO -->
-      ${SOCIOS.length ? `
-      <div class="card" style="margin-bottom:12px">
-        <div class="card-title">Reparto por socio</div>
-        ${SOCIOS.map(s=>`
-          <div class="card-row">
-            <span class="card-label">Socio ${s}</span>
-            <span class="card-value" style="color:var(--gold)">${fmt(porSocio)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-
-      <!-- DESGLOSE INGRESOS -->
-      ${Object.keys(catIngresos).length ? `
-      <div class="card" style="margin-bottom:12px">
-        <div class="card-title">Ingresos por categoría</div>
-        ${Object.entries(catIngresos).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`
-          <div class="card-row">
-            <span class="card-label">${k}</span>
-            <span class="card-value" style="color:var(--green)">${fmt(v)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-
-      <!-- DESGLOSE GASTOS -->
-      ${Object.keys(catGastos).length ? `
-      <div class="card" style="margin-bottom:12px">
-        <div class="card-title">Gastos por categoría</div>
-        ${Object.entries(catGastos).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`
-          <div class="card-row">
-            <span class="card-label">${k}</span>
-            <span class="card-value" style="color:var(--red)">${fmt(v)}</span>
-          </div>`).join('')}
-      </div>` : ''}
-
-      <!-- DETALLE MOVIMIENTOS -->
-      <div class="section-header" style="margin-top:8px">
-        <span style="font-size:14px;font-weight:600;color:var(--text-dim)">Movimientos (${movs.length})</span>
-      </div>
-      ${movs.map(c=>`
-        <div class="list-item">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div class="list-item-title">${c.Concepto||'Sin concepto'}</div>
-              <div class="list-item-sub">${c.Fecha||''} · ${c.Categoria||c.Tipo||''} ${c.Socio?'· Socio '+c.Socio:''}</div>
-            </div>
-            <div style="font-size:15px;font-weight:700;color:${c.Tipo==='Cobro'?'var(--green)':'var(--red)'}">
-              ${c.Tipo==='Cobro'?'+':'−'}${fmt(parseFloat(c.Monto)||0)}
-            </div>
-          </div>
-        </div>`).join('')}
-      ${!movs.length?'<div class="empty-state"><p>Sin movimientos en este período</p></div>':''}
-    `;
-  } catch(e) { showError(content, e.message); }
-}
-
-function filtroRapido(tipo) {
-  const hoy = new Date();
-  const y = hoy.getFullYear();
-  const m = String(hoy.getMonth()+1).padStart(2,'0');
-  const ultimoDia = new Date(y, hoy.getMonth()+1, 0).getDate();
-  const rangos = {
-    q1:  { desde: `${y}-${m}-01`, hasta: `${y}-${m}-15` },
-    q2:  { desde: `${y}-${m}-16`, hasta: `${y}-${m}-${ultimoDia}` },
-    mes: { desde: `${y}-${m}-01`, hasta: `${y}-${m}-${ultimoDia}` },
-  };
-  const r = rangos[tipo];
-  if (!r) return;
-  const el1 = document.getElementById('c-desde');
-  const el2 = document.getElementById('c-hasta');
-  if (el1) el1.value = r.desde;
-  if (el2) el2.value = r.hasta;
-}
-
-function aplicarFiltro() {
-  const desde = document.getElementById('c-desde')?.value;
-  const hasta  = document.getElementById('c-hasta')?.value;
-  if (!desde || !hasta) { showToast('Selecciona ambas fechas'); return; }
-  renderCorte(desde, hasta);
-}
-
-async function openCajaForm() {
+function handleDashboard() {
   const hoy = new Date().toISOString().split('T')[0];
-  // Categorías de gastos comunes del taller (tomadas del cuaderno)
-  const catGastos = ['Gasolina/Gas','Aceite/Lubricante','Repuesto','Herramienta','Limpieza','Agua/Bebidas','Comida personal','Sueldo mecánico','Alquiler/Local','Electricidad','Otros gastos'];
-  const catIngresos = ['Mano de obra','Repuesto vendido','Diagnóstico','Otros ingresos'];
-  openDrawer(`
-    <div class="drawer-title">Registrar movimiento</div>
-    <div class="form-group">
-      <label class="form-label">Tipo</label>
-      <select class="form-select" id="f-tipo" onchange="updateCatOptions()">
-        <option value="Cobro">Cobro (Ingreso)</option>
-        <option value="Gasto">Gasto / Costo</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Categoría</label>
-      <select class="form-select" id="f-cat">
-        ${catIngresos.map(c=>`<option>${c}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group"><label class="form-label">Concepto / Descripción</label>
-      <input type="text" class="form-input" id="f-concepto" placeholder="Ej: Aceite motor carro rojo">
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Monto (RD$)</label>
-        <input type="number" class="form-input" id="f-monto" placeholder="0">
-      </div>
-      <div class="form-group"><label class="form-label">Fecha</label>
-        <input type="date" class="form-input" id="f-fecha" value="${hoy}">
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Socio (opcional)</label>
-      <select class="form-select" id="f-socio">
-        <option value="">— Todos —</option>
-        ${SOCIOS.map(s=>`<option value="${s}">Socio ${s}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Método de pago</label>
-      <select class="form-select" id="f-metodo">
-        <option>Efectivo</option><option>Tarjeta</option><option>Transferencia</option>
-      </select>
-    </div>
-    <button class="btn btn-primary" onclick="saveCaja()">Guardar</button>
-  `);
-  // guardar listas para onchange
-  window._catGastos = catGastos;
-  window._catIngresos = catIngresos;
-}
+  const ordenes  = sheetToObjects(getSheet('Ordenes'));
+  const caja     = sheetToObjects(getSheet('Caja'));
+  const citas    = sheetToObjects(getSheet('Citas'));
+  const clientes = sheetToObjects(getSheet('Clientes'));
 
-function updateCatOptions() {
-  const tipo = document.getElementById('f-tipo')?.value;
-  const sel  = document.getElementById('f-cat');
-  if (!sel) return;
-  const lista = tipo === 'Gasto' ? (window._catGastos||[]) : (window._catIngresos||[]);
-  sel.innerHTML = lista.map(c=>`<option>${c}</option>`).join('');
-}
+  const estados = { Pendiente: 0, 'En proceso': 0, Listo: 0, Entregado: 0 };
+  ordenes.forEach(o => { if (estados[o.Estado] !== undefined) estados[o.Estado]++; });
 
-async function saveCaja() {
-  const data = {
-    Tipo:      document.getElementById('f-tipo').value,
-    Categoria: document.getElementById('f-cat').value,
-    Concepto:  document.getElementById('f-concepto').value.trim(),
-    Monto:     document.getElementById('f-monto').value,
-    Fecha:     document.getElementById('f-fecha').value,
-    Socio:     document.getElementById('f-socio').value,
-    MetodoPago:document.getElementById('f-metodo').value,
+  const ingresosMes = caja
+    .filter(c => c.Tipo === 'Cobro' && c.Fecha && c.Fecha.toString().startsWith(hoy.substring(0,7)))
+    .reduce((sum, c) => sum + (parseFloat(c.Monto) || 0), 0);
+
+  const citasHoy = citas.filter(c => c.Fecha === hoy).length;
+
+  return {
+    totalClientes:  clientes.length,
+    ordenesActivas: (estados['Pendiente'] || 0) + (estados['En proceso'] || 0),
+    estadosOrdenes: estados,
+    ingresosMes:    ingresosMes,
+    citasHoy:       citasHoy
   };
-  if (!data.Monto || !data.Concepto) { showToast('Completa monto y concepto'); return; }
-  try {
-    await apiPost({action:'create', sheet:'Caja', data});
-    clearCache('Caja'); closeDrawer(); renderCorte();
-    showToast('✅ Movimiento registrado');
-  } catch(e) { showToast('Error: '+e.message); }
 }
 
-// ── HELPERS ───────────────────────────────────────────────────
-async function deleteRecord(sheet, id, reloadTab) {
-  if (!confirm('¿Eliminar este registro?')) return;
-  try {
-    await apiPost({action:'delete', sheet, id});
-    clearCache(sheet); closeDrawer();
-    navigate(reloadTab);
-    showToast('Eliminado');
-  } catch(e) { showToast('Error: '+e.message); }
-}
+// ─── SETUP ───────────────────────────────────────────────────
 
-function openDrawer(html) {
-  document.getElementById('drawer-content').innerHTML = html;
-  document.getElementById('overlay').classList.add('open');
-  document.body.style.overflow = 'hidden';
-}
-
-function closeDrawer(e) {
-  if (e && e.target !== document.getElementById('overlay')) return;
-  document.getElementById('overlay').classList.remove('open');
-  document.body.style.overflow = '';
-}
-
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 2500);
-}
-
-function showError(container, msg) {
-  container.innerHTML = `<div class="empty-state"><p style="color:var(--red)">⚠️ ${msg}</p><p style="margin-top:8px;font-size:12px">Verifica la URL del API en config</p></div>`;
-}
-
-// ── INIT ──────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  renderDashboard();
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
+function setupSpreadsheet() {
+  Object.values(SHEETS).forEach(name => getSheet(name));
+  // Agregar mecánicos por defecto si no existen
+  const mecSheet = getSheet('Mecanicos');
+  const mecs = sheetToObjects(mecSheet);
+  if (mecs.length === 0) {
+    mecSheet.appendRow(['MEC-001','Ray','','Mecánico','Activo']);
+    mecSheet.appendRow(['MEC-002','Jorge','','Mecánico','Activo']);
   }
-});
-</script>
-</body>
-</html>
+  SpreadsheetApp.getActiveSpreadsheet().toast('✅ Hojas listas', 'RJ Auto Service', 5);
+}
