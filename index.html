@@ -218,6 +218,18 @@ button{cursor:pointer}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>
       Dividendos
     </button>
+    <button class="nav-item" onclick="navigate('resumen')" data-tab="resumen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+      Resumen
+    </button>
+    <button class="nav-item" onclick="navigate('estado')" data-tab="estado">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      Estado
+    </button>
+    <button class="nav-item" onclick="navigate('libro')" data-tab="libro">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+      Libro
+    </button>
   </nav>
 </div>
 
@@ -286,6 +298,9 @@ function navigate(tab) {
 
     corte:     renderCorte,
     dividendos: renderDividendos,
+    resumen:    renderResumen,
+    estado:     renderEstado,
+    libro:      renderLibro,
   };
   views[tab]?.();
 }
@@ -1448,6 +1463,272 @@ async function registrarDecision(decision, desde, hasta, monto) {
     showToast(`✅ ${decision === 'Repartir' ? 'Dividendos repartidos' : 'Guardado en reserva'}`);
     renderDividendos(desde, hasta);
   } catch(e) { showToast('Error: '+e.message); }
+}
+
+
+// ── RESUMEN ───────────────────────────────────────────────────
+async function renderResumen(desdeParm, hastaParm) {
+  const content = document.getElementById('content');
+  content.innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+  const q = getQuincenaDefecto();
+  const desde = desdeParm || q.desde;
+  const hasta  = hastaParm || q.hasta;
+  try {
+    const caja = await getAll('Caja');
+    const periodo = caja.filter(c => {
+      const f = (c.Fecha||'').toString().substring(0,10);
+      return f >= desde && f <= hasta;
+    });
+    const fmt = v => `RD$${Math.round(v).toLocaleString('es-DO')}`;
+    const ingresos    = periodo.filter(c=>c.Tipo==='Cobro').reduce((s,c)=>s+(parseFloat(c.Monto)||0),0);
+    const costoRep    = periodo.filter(c=>c.Tipo==='Gasto'&&c.Categoria==='Repuesto').reduce((s,c)=>s+(parseFloat(c.Monto)||0),0);
+    const gastosOp    = periodo.filter(c=>c.Tipo==='Gasto'&&c.Categoria!=='Repuesto'&&c.Categoria!=='Sueldo mecánico'&&!c.Socio).reduce((s,c)=>s+(parseFloat(c.Monto)||0),0);
+    const salarios    = periodo.filter(c=>c.Categoria==='Sueldo mecánico').reduce((s,c)=>s+(parseFloat(c.Monto)||0),0);
+    const utilidad    = ingresos - costoRep - gastosOp - salarios;
+    const adelantos   = {};
+    SOCIOS.forEach(s => {
+      adelantos[s.id] = periodo.filter(c=>c.Tipo==='Gasto'&&c.Socio===s.id).reduce((sum,c)=>sum+(parseFloat(c.Monto)||0),0);
+    });
+    const row = (label, val, color='var(--text)') =>
+      `<div class="card-row"><span class="card-label">${label}</span><span style="font-weight:600;color:${color}">${val}</span></div>`;
+
+    content.innerHTML = `
+      <div class="section-header">
+        <span class="section-title">Resumen</span>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">Período</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div class="form-group" style="margin:0"><label class="form-label">Desde</label>
+            <input type="date" class="form-input" id="r-desde" value="${desde}"></div>
+          <div class="form-group" style="margin:0"><label class="form-label">Hasta</label>
+            <input type="date" class="form-input" id="r-hasta" value="${hasta}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
+          <button class="btn btn-secondary btn-sm" onclick="filtroVista('r','q1')">1–15</button>
+          <button class="btn btn-secondary btn-sm" onclick="filtroVista('r','q2')">16–fin</button>
+          <button class="btn btn-secondary btn-sm" onclick="filtroVista('r','mes')">Mes</button>
+        </div>
+        <button class="btn btn-primary" onclick="aplicarVista('resumen','r')">Calcular</button>
+      </div>
+
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">Ingresos vs Gastos</div>
+        ${row('Ingresos totales', fmt(ingresos), 'var(--green)')}
+        ${row('Costo repuestos', '−'+fmt(costoRep), 'var(--red)')}
+        ${row('Gastos operativos', '−'+fmt(gastosOp), 'var(--red)')}
+        ${row('Salarios', '−'+fmt(salarios), 'var(--red)')}
+        <div style="height:1px;background:var(--border);margin:8px 0"></div>
+        ${row('UTILIDAD', fmt(utilidad), utilidad>=0?'var(--green)':'var(--red)')}
+      </div>
+
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">Adelantos por socio</div>
+        ${SOCIOS.map(s=>row(s.nombre, adelantos[s.id]>0?fmt(adelantos[s.id]):'—', adelantos[s.id]>0?'var(--orange)':'var(--text-dim)')).join('')}
+        <div style="height:1px;background:var(--border);margin:8px 0"></div>
+        ${row('Total adelantado', fmt(Object.values(adelantos).reduce((a,b)=>a+b,0)), 'var(--orange)')}
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi" style="--accent:var(--green)">
+          <div class="kpi-val" style="font-size:18px">${fmt(ingresos)}</div>
+          <div class="kpi-label">Total ingresos</div>
+        </div>
+        <div class="kpi" style="--accent:${utilidad>=0?'var(--green)':'var(--red)'}">
+          <div class="kpi-val" style="font-size:18px">${fmt(utilidad)}</div>
+          <div class="kpi-label">Utilidad neta</div>
+        </div>
+      </div>`;
+  } catch(e) { showError(content, e.message); }
+}
+
+// ── ESTADO (vista cuaderno 2 columnas) ───────────────────────
+async function renderEstado(desdeParm, hastaParm) {
+  const content = document.getElementById('content');
+  content.innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+  const q = getQuincenaDefecto();
+  const desde = desdeParm || q.desde;
+  const hasta  = hastaParm || q.hasta;
+  try {
+    const caja = await getAll('Caja');
+    const periodo = caja.filter(c => {
+      const f = (c.Fecha||'').toString().substring(0,10);
+      return f >= desde && f <= hasta;
+    });
+    const fmt = v => Math.round(v).toLocaleString('es-DO');
+    const gastos   = periodo.filter(c=>c.Tipo==='Gasto');
+    const ingresos = periodo.filter(c=>c.Tipo==='Cobro');
+    const totalG   = gastos.reduce((s,c)=>s+(parseFloat(c.Monto)||0),0);
+    const totalI   = ingresos.reduce((s,c)=>s+(parseFloat(c.Monto)||0),0);
+    const maxRows  = Math.max(gastos.length, ingresos.length);
+
+    const tdStyle = 'padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border)';
+    const thStyle = 'padding:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;background:var(--surface2)';
+
+    let rows = '';
+    for (let i = 0; i < maxRows; i++) {
+      const g = gastos[i];
+      const ing = ingresos[i];
+      rows += `<tr>
+        <td style="${tdStyle};color:var(--text-dim)">${g ? (g.Concepto||'').substring(0,22) : ''}</td>
+        <td style="${tdStyle};text-align:right;color:var(--red);white-space:nowrap">${g ? fmt(parseFloat(g.Monto)||0) : ''}</td>
+        <td style="${tdStyle};width:1px;background:var(--border)"></td>
+        <td style="${tdStyle};color:var(--text-dim)">${ing ? (ing.Concepto||'').substring(0,22) : ''}</td>
+        <td style="${tdStyle};text-align:right;color:var(--green);white-space:nowrap">${ing ? fmt(parseFloat(ing.Monto)||0) : ''}</td>
+      </tr>`;
+    }
+
+    content.innerHTML = `
+      <div class="section-header"><span class="section-title">Estado</span></div>
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div class="form-group" style="margin:0"><label class="form-label">Desde</label>
+            <input type="date" class="form-input" id="e2-desde" value="${desde}"></div>
+          <div class="form-group" style="margin:0"><label class="form-label">Hasta</label>
+            <input type="date" class="form-input" id="e2-hasta" value="${hasta}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
+          <button class="btn btn-secondary btn-sm" onclick="filtroVista('e2','q1')">1–15</button>
+          <button class="btn btn-secondary btn-sm" onclick="filtroVista('e2','q2')">16–fin</button>
+          <button class="btn btn-secondary btn-sm" onclick="filtroVista('e2','mes')">Mes</button>
+        </div>
+        <button class="btn btn-primary" onclick="aplicarVista('estado','e2')">Ver estado</button>
+      </div>
+
+      <div style="overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)">
+        <table style="width:100%;border-collapse:collapse;min-width:320px">
+          <thead>
+            <tr>
+              <th style="${thStyle};color:var(--red);text-align:left">GASTOS</th>
+              <th style="${thStyle};color:var(--red);text-align:right">RD$</th>
+              <th style="${thStyle};width:1px;background:var(--border)"></th>
+              <th style="${thStyle};color:var(--green);text-align:left">INGRESOS</th>
+              <th style="${thStyle};color:var(--green);text-align:right">RD$</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+          <tfoot>
+            <tr style="background:var(--surface2)">
+              <td style="padding:8px;font-weight:700;font-size:12px">TOTAL</td>
+              <td style="padding:8px;font-weight:800;color:var(--red);text-align:right">${fmt(totalG)}</td>
+              <td style="background:var(--border)"></td>
+              <td style="padding:8px;font-weight:700;font-size:12px">TOTAL</td>
+              <td style="padding:8px;font-weight:800;color:var(--green);text-align:right">${fmt(totalI)}</td>
+            </tr>
+            <tr style="background:var(--surface2)">
+              <td colspan="2" style="padding:8px;font-size:12px;color:var(--text-dim)">BALANCE</td>
+              <td style="background:var(--border)"></td>
+              <td colspan="2" style="padding:8px;font-weight:800;text-align:right;color:${totalI-totalG>=0?'var(--green)':'var(--red)'}">
+                ${totalI-totalG>=0?'+':''}${fmt(totalI-totalG)}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>`;
+  } catch(e) { showError(content, e.message); }
+}
+
+// ── LIBRO (cronológico) ───────────────────────────────────────
+async function renderLibro(desdeParm, hastaParm) {
+  const content = document.getElementById('content');
+  content.innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+  const q = getQuincenaDefecto();
+  const desde = desdeParm || q.desde;
+  const hasta  = hastaParm || q.hasta;
+  try {
+    const caja = await getAll('Caja');
+    const periodo = [...caja.filter(c => {
+      const f = (c.Fecha||'').toString().substring(0,10);
+      return f >= desde && f <= hasta;
+    })].sort((a,b) => a.Fecha?.toString().localeCompare(b.Fecha?.toString()||'')||0);
+
+    const fmt = v => Math.round(v).toLocaleString('es-DO');
+    let saldo = 0;
+    const totalDebe  = periodo.filter(c=>c.Tipo==='Gasto').reduce((s,c)=>s+(parseFloat(c.Monto)||0),0);
+    const totalHaber = periodo.filter(c=>c.Tipo==='Cobro').reduce((s,c)=>s+(parseFloat(c.Monto)||0),0);
+    const tdStyle = 'padding:6px 8px;font-size:11px;border-bottom:1px solid var(--border)';
+    const thStyle = 'padding:8px 6px;font-size:10px;font-weight:700;text-transform:uppercase;background:var(--surface2);white-space:nowrap';
+
+    const rows = periodo.map(c => {
+      const monto = parseFloat(c.Monto)||0;
+      if (c.Tipo==='Cobro') saldo += monto; else saldo -= monto;
+      const fecha = c.Fecha?.toString().substring(5,10)||'';
+      return `<tr>
+        <td style="${tdStyle};color:var(--text-dim);white-space:nowrap">${fecha}</td>
+        <td style="${tdStyle}">${(c.Concepto||'').substring(0,24)}</td>
+        <td style="${tdStyle};text-align:right;color:var(--red)">${c.Tipo==='Gasto'?fmt(monto):''}</td>
+        <td style="${tdStyle};text-align:right;color:var(--green)">${c.Tipo==='Cobro'?fmt(monto):''}</td>
+        <td style="${tdStyle};text-align:right;font-weight:600;color:${saldo>=0?'var(--green)':'var(--red)'}">${fmt(saldo)}</td>
+      </tr>`;
+    }).join('');
+
+    content.innerHTML = `
+      <div class="section-header"><span class="section-title">Libro</span></div>
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div class="form-group" style="margin:0"><label class="form-label">Desde</label>
+            <input type="date" class="form-input" id="l-desde" value="${desde}"></div>
+          <div class="form-group" style="margin:0"><label class="form-label">Hasta</label>
+            <input type="date" class="form-input" id="l-hasta" value="${hasta}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
+          <button class="btn btn-secondary btn-sm" onclick="filtroVista('l','q1')">1–15</button>
+          <button class="btn btn-secondary btn-sm" onclick="filtroVista('l','q2')">16–fin</button>
+          <button class="btn btn-secondary btn-sm" onclick="filtroVista('l','mes')">Mes</button>
+        </div>
+        <button class="btn btn-primary" onclick="aplicarVista('libro','l')">Ver libro</button>
+      </div>
+
+      <div style="overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr>
+              <th style="${thStyle}">Fecha</th>
+              <th style="${thStyle}">Concepto</th>
+              <th style="${thStyle};color:var(--red)">Debe</th>
+              <th style="${thStyle};color:var(--green)">Haber</th>
+              <th style="${thStyle}">Saldo</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="5" style="padding:20px;text-align:center;color:var(--text-dim)">Sin movimientos</td></tr>'}</tbody>
+          <tfoot>
+            <tr style="background:var(--surface2)">
+              <td colspan="2" style="padding:8px;font-weight:700;font-size:12px">TOTALES</td>
+              <td style="padding:8px;font-weight:800;color:var(--red);text-align:right">${fmt(totalDebe)}</td>
+              <td style="padding:8px;font-weight:800;color:var(--green);text-align:right">${fmt(totalHaber)}</td>
+              <td style="padding:8px;font-weight:800;text-align:right;color:${totalHaber-totalDebe>=0?'var(--green)':'var(--red)'}">${fmt(totalHaber-totalDebe)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>`;
+  } catch(e) { showError(content, e.message); }
+}
+
+// ── HELPERS COMPARTIDOS PARA FILTROS DE VISTAS ───────────────
+function filtroVista(prefix, tipo) {
+  const hoy = new Date();
+  const y = hoy.getFullYear();
+  const m = String(hoy.getMonth()+1).padStart(2,'0');
+  const ultimoDia = new Date(y, hoy.getMonth()+1, 0).getDate();
+  const rangos = {
+    q1:  { desde: `${y}-${m}-01`, hasta: `${y}-${m}-15` },
+    q2:  { desde: `${y}-${m}-16`, hasta: `${y}-${m}-${ultimoDia}` },
+    mes: { desde: `${y}-${m}-01`, hasta: `${y}-${m}-${ultimoDia}` },
+  };
+  const r = rangos[tipo];
+  if (!r) return;
+  const el1 = document.getElementById(`${prefix}-desde`);
+  const el2 = document.getElementById(`${prefix}-hasta`);
+  if (el1) el1.value = r.desde;
+  if (el2) el2.value = r.hasta;
+}
+
+function aplicarVista(tab, prefix) {
+  const desde = document.getElementById(`${prefix}-desde`)?.value;
+  const hasta  = document.getElementById(`${prefix}-hasta`)?.value;
+  if (!desde || !hasta) { showToast('Selecciona ambas fechas'); return; }
+  const fns = { resumen: renderResumen, estado: renderEstado, libro: renderLibro };
+  fns[tab]?.(desde, hasta);
 }
 
 // ── HELPERS ───────────────────────────────────────────────────
