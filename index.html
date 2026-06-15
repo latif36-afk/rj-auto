@@ -633,13 +633,13 @@ async function entregarOrden(ordenId) {
   } catch(e) { showToast('Error: '+e.message); }
 }
 
-function compartirWhatsApp(ordenId, placa, cliente, total) {
+function compartirWhatsApp(ordenId, marca, modelo, cliente, total) {
+  const montoFmt = isNaN(parseFloat(total)) ? '0' : Math.round(parseFloat(total)).toLocaleString('es-DO');
   const msg = `*RJ Auto Service*
 
 Cliente: ${cliente}
-Vehículo: ${placa}
-Orden: ${ordenId}
-Total: RD$${Math.round(total).toLocaleString('es-DO')}
+Vehículo: ${marca} ${modelo}
+Cotización sin ITBIS: RD$${montoFmt}
 
 ¡Gracias por su preferencia!`;
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
