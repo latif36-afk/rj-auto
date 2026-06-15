@@ -182,11 +182,16 @@ button{cursor:pointer}
 <div id="app">
   <!-- HEADER -->
   <header id="header">
-    <div class="header-logo">
-      <div class="logo-icon">RJ</div>
-      <div>
-        <div class="header-title">RJ Auto Service</div>
-        <div class="header-sub" id="header-sub">Cargando...</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <button id="btn-back" onclick="goBack()" style="display:none;background:none;border:none;color:var(--text-dim);padding:4px;cursor:pointer;flex-shrink:0">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+      </button>
+      <div class="header-logo">
+        <div class="logo-icon">RJ</div>
+        <div>
+          <div class="header-title">RJ Auto Service</div>
+          <div class="header-sub" id="header-sub">Cargando...</div>
+        </div>
       </div>
     </div>
     <div id="notif-badge"></div>
@@ -250,7 +255,21 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbziHOwaqAOwC7FMWKddyz3R
 
 // ── STATE ─────────────────────────────────────────────────────
 let currentTab = 'dashboard';
+let navHistory = [];
 let cache = {};
+
+function goBack() {
+  if (navHistory.length > 1) {
+    navHistory.pop(); // remove current
+    const prev = navHistory.pop(); // get previous
+    navigate(prev, true);
+  }
+}
+
+function updateBackButton() {
+  const btn = document.getElementById('btn-back');
+  if (btn) btn.style.display = navHistory.length > 1 ? 'block' : 'none';
+}
 
 // ── API ───────────────────────────────────────────────────────
 async function api(params) {
@@ -286,8 +305,10 @@ async function getAll(sheet) {
 function clearCache(sheet) { delete cache[sheet]; }
 
 // ── NAVIGATION ────────────────────────────────────────────────
-function navigate(tab) {
+function navigate(tab, isBack = false) {
   currentTab = tab;
+  if (!isBack) navHistory.push(tab);
+  updateBackButton();
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.tab === tab);
   });
@@ -323,14 +344,8 @@ async function renderDashboard() {
           <div class="kpi-val">RD$${(d.ingresosMes||0).toLocaleString('es-DO')}</div>
           <div class="kpi-label">Ingresos este mes</div>
         </div>
-        <div class="kpi" style="--accent:var(--blue)">
-          <div class="kpi-val">${d.citasHoy}</div>
-          <div class="kpi-label">Citas hoy</div>
-        </div>
-        <div class="kpi" style="--accent:var(--text-dim)">
-          <div class="kpi-val">${d.totalClientes}</div>
-          <div class="kpi-label">Clientes</div>
-        </div>
+
+
       </div>
       <div class="card">
         <div class="card-title">Estado de órdenes</div>
@@ -480,7 +495,7 @@ async function openOrden(id) {
       ${!entregado?`
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
         <button class="btn btn-secondary" onclick="cambiarEstado('${id}','${o.Estado}')">🔄 Estado</button>
-        <button class="btn btn-secondary" onclick="compartirWhatsApp('${id}','${v.Placa||''}','${c.Nombre||''}',${totalCobrado})">📲 WhatsApp</button>
+        <button class="btn btn-secondary" onclick="compartirWhatsApp('${id}','${v.Marca||''}','${v.Modelo||''}','${c.Nombre||''}',${totalCobrado})">📲 WhatsApp</button>
       </div>
       <button class="btn btn-primary" onclick="confirmarEntrega('${id}')">✅ Marcar entregado y cobrar</button>
       <div style="margin-top:10px">
@@ -490,7 +505,7 @@ async function openOrden(id) {
         <div style="color:var(--green);font-weight:700;font-size:15px">✅ Cobrado: ${fmt(totalCobrado)}</div>
         <div style="color:var(--text-dim);font-size:12px;margin-top:4px">Registrado en caja automáticamente</div>
       </div>
-      <button class="btn btn-secondary" onclick="compartirWhatsApp('${id}','${v.Placa||''}','${c.Nombre||''}',${totalCobrado})">📲 Enviar resumen por WhatsApp</button>`}
+      <button class="btn btn-secondary" onclick="compartirWhatsApp('${id}','${v.Marca||''}','${v.Modelo||''}','${c.Nombre||''}',${totalCobrado})">📲 Enviar resumen por WhatsApp</button>`}
     `);
   } catch(e) { showToast('Error: '+e.message); }
 }
@@ -536,18 +551,9 @@ async function agregarItem(ordenId, tipo) {
         </div>
       </div>
     </div>`:`
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Precio M.O. (RD$)</label>
-        <input type="number" class="form-input" id="i-precio" placeholder="0">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Asignar a socio</label>
-        <select class="form-select" id="i-socio-ingreso">
-          <option value="">— General —</option>
-          ${socioOpts}
-        </select>
-      </div>
+    <div class="form-group">
+      <label class="form-label">Precio M.O. (RD$)</label>
+      <input type="number" class="form-input" id="i-precio" placeholder="0">
     </div>`}
     <button class="btn btn-primary" onclick="saveItem('${ordenId}','${tipo}')">Agregar</button>
   `);
@@ -592,9 +598,10 @@ async function deleteItem(itemId, ordenId) {
 }
 
 async function confirmarEntrega(ordenId) {
+  const socioOpts = SOCIOS.map(s=>`<option value="${s.id}">${s.nombre}</option>`).join('');
   openDrawer(`
     <div class="drawer-title">Confirmar entrega</div>
-    <p style="color:var(--text-dim);margin-bottom:16px">Selecciona el método de pago. Se registrará el cobro en caja automáticamente.</p>
+    <p style="color:var(--text-dim);margin-bottom:16px">Completa los datos del cobro. Se registrará automáticamente en caja.</p>
     <div class="form-group">
       <label class="form-label">Método de pago</label>
       <select class="form-select" id="e-metodo">
@@ -603,14 +610,22 @@ async function confirmarEntrega(ordenId) {
         <option>Transferencia</option>
       </select>
     </div>
+    <div class="form-group">
+      <label class="form-label">¿Quién recibe el dinero?</label>
+      <select class="form-select" id="e-receptor">
+        <option value="caja">Caja del taller</option>
+        ${socioOpts}
+      </select>
+    </div>
     <button class="btn btn-primary" onclick="entregarOrden('${ordenId}')">✅ Confirmar y cobrar</button>
   `);
 }
 
 async function entregarOrden(ordenId) {
-  const metodo = document.getElementById('e-metodo')?.value || 'Efectivo';
+  const metodo   = document.getElementById('e-metodo')?.value || 'Efectivo';
+  const receptor = document.getElementById('e-receptor')?.value || 'caja';
   try {
-    const result = await api({action:'entregarOrden', id:ordenId, metodo});
+    const result = await api({action:'entregarOrden', id:ordenId, metodo, receptor});
     clearCache('Ordenes'); clearCache('Caja');
     closeDrawer();
     showToast(`✅ Cobrado RD$${Math.round(result.totalCobrado).toLocaleString('es-DO')}`);
